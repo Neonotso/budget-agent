@@ -10,4 +10,4 @@ COPY . .
 
 EXPOSE 8080
 
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0"]
+CMD ["sh", "-c", "echo \"Container started\" && sleep 3600"]
