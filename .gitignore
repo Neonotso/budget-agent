@@ -1,1 +1,21 @@
+# Byte-compiled files
+__pycache__/
+*.py[cod]
+
+# Virtual environment folders
 .venv/
+venv/
+env/
+.env/
+
+# IDE files
+.vscode/
+.idea/
+
+# macOS files
+.DS_Store
+
+# Backup files
+*.bak
+*.tmp
+ai/
