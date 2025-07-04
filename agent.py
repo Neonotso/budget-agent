@@ -7,10 +7,15 @@ from livekit.plugins import (
 
 from datetime import datetime, timedelta
 
+import budget_tools
+import budget_tools
+print("budget_tools loaded from:", budget_tools.__file__)
 from budget_tools import BudgetSheetsManager
+print("BudgetSheetsManager loaded from:", BudgetSheetsManager.__module__)
+print("Methods:", dir(BudgetSheetsManager))
 
-
-
+manager = BudgetSheetsManager()
+print(manager.get_all_existing_categories())
 
 
 
@@ -19,16 +24,20 @@ class ToolError(Exception):
     pass
 
 
-
 class Assistant(Agent):
     def __init__(self) -> None:
         super().__init__(instructions="You are a helpful voice AI assistant.")
-        self.budget_manager = BudgetSheetsManager()
+        try:
+            self.budget_manager = BudgetSheetsManager()
+            print("BudgetSheetsManager initialized successfully.")
+            print("BudgetSheetsManager methods:", dir(self.budget_manager))
+        except Exception as e:
+            print(f"Error initializing BudgetSheetsManager: {e}")
+            raise
 
     @function_tool()
     async def add_transaction(self, context: RunContext, date: str, description: str, amount: float, transaction_type: str, category: str = ""):
-        """Adds a new transaction to the budget. Date must be in YYYY-MM-DD format, or can be 'today' or 'yesterday'. Transaction type must be 'Income' or 'Expense'. The category must be an existing category from the budget. If the category does not exist, ask the user to provide an existing category."""
-        # Interpret relative dates
+        """Adds a new transaction to the budget."""
         if date.lower() == "today":
             date = datetime.now().strftime("%Y-%m-%d")
         elif date.lower() == "yesterday":
@@ -44,15 +53,13 @@ class Assistant(Agent):
                 return {
                     "status": "error",
                     "message": f"Category '{category}' does not exist. Would you like to create it or choose an existing category? Existing categories: {', '.join(existing_categories_response['categories'])}."
-                        }
-
+                }
 
         return self.budget_manager.add_transaction(date, description, amount, transaction_type, category)
 
     @function_tool()
     async def edit_transaction(self, context: RunContext, row_index: int, date: str = None, description: str = None, amount: float = None, transaction_type: str = None, category: str = None):
-        """Edits an existing transaction in the budget. Row index is 1-based. Only provide fields you want to change."""
-        # Interpret relative dates if provided
+        """Edits an existing transaction in the budget."""
         if date:
             if date.lower() == "today":
                 date = datetime.now().strftime("%Y-%m-%d")
@@ -64,7 +71,7 @@ class Assistant(Agent):
 
     @function_tool()
     async def delete_transaction(self, context: RunContext, description: str = None, category: str = None, amount: float = None, date: str = None):
-        """Deletes a transaction from the budget based on its description, category, amount, or date. The AI should use these parameters to find the specific transaction to delete. If multiple transactions match, the AI should ask for clarification."""
+        """Deletes a transaction from the budget based on matching criteria."""
         all_transactions_response = self.budget_manager.get_all_transactions()
         if all_transactions_response["status"] == "error":
             return all_transactions_response
@@ -89,10 +96,8 @@ class Assistant(Agent):
         if len(matching_transactions) == 0:
             return {"status": "error", "message": "No matching transaction found."}
         elif len(matching_transactions) > 1:
-            # The AI should ask for clarification if multiple transactions match
             return {"status": "ambiguous", "message": f"Multiple transactions match your criteria. Please be more specific. Matching transactions: {matching_transactions}"}
         else:
-            # Exactly one transaction matches, proceed with deletion
             transaction_to_delete = matching_transactions[0]
             row_index = transaction_to_delete['_row_index']
             return self.budget_manager.delete_transaction(row_index)
@@ -104,38 +109,41 @@ class Assistant(Agent):
 
     @function_tool()
     async def get_transactions(self, context: RunContext, date: str = None, description: str = None, amount: float = None, transaction_type: str = None, category: str = None):
-        """Retrieves transactions from the budget based on optional filters. Date can be a specific date (YYYY-MM-DD) or a range (e.g., 'last week', 'this month')."""
-        # The budget_tools.py get_all_transactions returns all, we'll filter here or in budget_tools if needed
-        # For now, let's assume get_all_transactions is sufficient and we'll filter in the agent if necessary
-        # Or, we can enhance get_all_transactions to accept filters.
-        # For simplicity, let's just return all for now and let the LLM filter or ask for more specific criteria.
+        """Retrieves transactions based on optional filters."""
         import asyncio
-        return await asyncio.to_thread(self.budget_manager.get_all_transactions)
+        return await asyncio.to_thread(self.budget_manager.get_all_transactions())
 
 
 async def entrypoint(ctx: agents.JobContext):
-    session = AgentSession(
-        llm=openai.realtime.RealtimeModel(
-            voice="coral"
+    try:
+        print("Starting entrypoint")
+
+        session = AgentSession(
+            llm=openai.realtime.RealtimeModel(
+                voice="coral"
+            )
         )
-    )
 
-    await session.start(
-        room=ctx.room,
-        agent=Assistant(),
-        room_input_options=RoomInputOptions(
-            # LiveKit Cloud enhanced noise cancellation
-            # - If self-hosting, omit this parameter
-            # - For telephony applications, use `BVCTelephony` for best results
-            noise_cancellation=noise_cancellation.BVC(),
-        ),
-    )
+        await ctx.connect()
+        print("Connected to JobContext")
 
-    await ctx.connect()
+        await session.start(
+            room=ctx.room,
+            agent=Assistant(),
+            room_input_options=RoomInputOptions(
+                noise_cancellation=noise_cancellation.BVC(),
+            ),
+        )
+        print("Session started")
 
-    await session.generate_reply(
-        instructions="Greet the user and offer your assistance."
-    )
+        await session.generate_reply(
+            instructions="Greet the user and offer your assistance."
+        )
+        print("Generated initial reply")
+
+    except Exception as e:
+        print(f"Exception in entrypoint: {e}")
+        raise
 
 
 if __name__ == "__main__":
