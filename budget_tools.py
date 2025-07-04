@@ -1,4 +1,4 @@
-import os.path
+import os
 from datetime import datetime
 
 from google.auth.transport.requests import Request
@@ -14,7 +14,10 @@ class BudgetSheetsManager:
     def __init__(self):
         self.creds = self._get_credentials()
         self.service = build("sheets", "v4", credentials=self.creds)
-        self.spreadsheet_id = self._get_spreadsheet_id()
+        self.spreadsheet_id = os.getenv("GOOGLE_SPREADSHEET_ID")
+
+        if not self.spreadsheet_id:
+            raise ValueError("GOOGLE_SPREADSHEET_ID is not set in environment")
 
     def _get_credentials(self):
         creds = None
@@ -195,6 +198,25 @@ class BudgetSheetsManager:
             return {"status": "error", "message": f"Google Sheets API error: {err}"}
         except Exception as e:
             return {"status": "error", "message": f"An unexpected error occurred: {e}"}
+
+    def get_all_existing_categories(self):
+        categories = set()
+        try:
+            # Get categories from Budgets sheet column A
+            budgets_result = self.service.spreadsheets().values().get(
+                spreadsheetId=self.spreadsheet_id, range="Budgets!A:A").execute()
+            budgets_values = budgets_result.get('values', [])
+            for row in budgets_values[1:]:  # skip header row
+                if row and row[0]:
+                    categories.add(row[0].strip())
+
+            return {"status": "success", "categories": list(categories)}
+        except HttpError as err:
+            return {"status": "error", "message": f"Google Sheets API error: {err}"}
+        except Exception as e:
+            return {"status": "error", "message": f"An unexpected error occurred: {e}"}
+
+
 
     def delete_transaction(self, row_index: int):
         try:
