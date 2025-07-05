@@ -1,4 +1,7 @@
 import os
+from dotenv import load_dotenv
+load_dotenv() # load from .env file
+
 from datetime import datetime
 
 from google.auth.transport.requests import Request
@@ -14,7 +17,8 @@ class BudgetSheetsManager:
     def __init__(self):
         self.creds = self._get_credentials()
         self.service = build("sheets", "v4", credentials=self.creds)
-        self.spreadsheet_id = os.getenv("GOOGLE_SPREADSHEET_ID")
+        self.spreadsheet_id = os.getenv("GOOGLE_SPREADSHEET_ID") or self._get_spreadsheet_id()
+        print(self.spreadsheet_id)
 
         if not self.spreadsheet_id:
             raise ValueError("GOOGLE_SPREADSHEET_ID is not set in environment")
@@ -108,6 +112,11 @@ class BudgetSheetsManager:
             return {"status": "error", "message": f"Google Sheets API error: {err}"}
         except Exception as e:
             return {"status": "error", "message": f"An unexpected error occurred: {e}"}
+            
+            # Assume appending to the bottom
+#            row_index = len(self.get_all_transactions()["transactions"]) + 2  # +2 for header
+            
+#            return row_index
 
     def get_all_transactions(self):
         try:
@@ -137,7 +146,7 @@ class BudgetSheetsManager:
                         'date': date, 
                         'description': description, 
                         'amount': amount, 
-                        'type': transaction_type, 
+                        'transaction_type': transaction_type, 
                         'category': category,
                         '_row_index': sheet_row_index
                     })
@@ -151,6 +160,39 @@ class BudgetSheetsManager:
         except Exception as e:
             return {"status": "error", "message": f"An unexpected error occurred: {e}"}
 
+
+
+    def find_matching_transactions(self, **criteria):
+        all_txns_response = self.get_all_transactions()
+        if all_txns_response["status"] != "success":
+            return {"status": "error", "message": all_txns_response["message"]}
+
+        transactions = all_txns_response["transactions"]
+
+        def matches(txn):
+            for key, value in criteria.items():
+                if value is None:
+                    continue
+                txn_value = txn.get(key)
+                if txn_value is None:
+                    return False
+
+                if key == "amount":
+                    try:
+                        if abs(float(txn_value) - float(value)) > 0.01:
+                            return False
+                    except:
+                        return False
+                else:
+                    if str(txn_value).strip().lower() != str(value).strip().lower():
+                        return False
+            return True
+
+        matches = [txn for txn in transactions if matches(txn)]
+
+        return {"status": "success", "matches": matches}
+
+
     def _get_sheet_id_by_name(self, sheet_name):
         spreadsheet_metadata = self.service.spreadsheets().get(spreadsheetId=self.spreadsheet_id).execute()
         sheets = spreadsheet_metadata.get('sheets', '')
@@ -159,45 +201,141 @@ class BudgetSheetsManager:
                 return s.get('properties').get('sheetId')
         return None
 
-    def edit_transaction(self, row_index: int, date: str = None, description: str = None, amount: float = None, transaction_type: str = None, category: str = None):
-        try:
-            # Fetch current row data to ensure we don't overwrite unrelated columns
-            result = self.service.spreadsheets().values().get(
-                spreadsheetId=self.spreadsheet_id, range=f"Transactions!A{row_index}:E{row_index}").execute()
-            current_row_values = result.get('values', [[]])[0] # Get the first row, or empty list
 
-            # Pad current_row_values to ensure it has 5 elements
-            while len(current_row_values) < 5:
-                current_row_values.append("")
 
-            # Update only the fields that are provided
-            if date is not None:
-                datetime.strptime(date, "%Y-%m-%d") # Validate date format
-                current_row_values[0] = date
-            if description is not None:
-                current_row_values[1] = description
-            if amount is not None:
-                current_row_values[2] = float(amount) # Ensure amount is float
-            if transaction_type is not None:
-                if transaction_type not in ["Income", "Expense"]:
-                    raise ValueError("Transaction type must be 'Income' or 'Expense'.")
-                current_row_values[3] = transaction_type
-            if category is not None:
-                current_row_values[4] = category
 
-            body = {'values': [current_row_values]}
-            update_range = f"Transactions!A{row_index}:E{row_index}"
-            self.service.spreadsheets().values().update(
-                spreadsheetId=self.spreadsheet_id, range=update_range,
-                valueInputOption="USER_ENTERED", body=body).execute()
-            
-            return {"status": "success", "message": f"Transaction at row {row_index} updated."}
-        except ValueError as ve:
-            return {"status": "error", "message": f"Invalid input: {ve}"}
-        except HttpError as err:
-            return {"status": "error", "message": f"Google Sheets API error: {err}"}
-        except Exception as e:
-            return {"status": "error", "message": f"An unexpected error occurred: {e}"}
+    def edit_transaction(self, row_index=None, date=None, description=None, amount=None, transaction_type=None, category=None):
+        # If row_index is provided, skip matching logic and go straight to delete + re-add
+        if row_index is not None:
+            print(f"[INFO] Editing by row_index: {row_index}")
+            try:
+                result = self.get_all_transactions()
+                if result["status"] != "success":
+                    # handle error, e.g.
+                    return "Failed to retrieve transactions."
+
+                transactions = result["transactions"]
+                try:
+                    original = transactions[row_index - 2]  # offset for header row
+                except IndexError:
+                    return f"Row index {row_index} is out of range."
+
+            except IndexError:
+                return f"Row index {row_index} is out of range."
+
+            updated_transaction = {
+                "date": date or original.get("date"),
+                "description": description or original.get("description"),
+                "amount": amount or original.get("amount"),
+                "transaction_type": transaction_type or original.get("transaction_type"),
+                "category": category or original.get("category"),
+            }
+
+            self.delete_transaction(row_index)
+            self.add_transaction(**updated_transaction)
+            return f"Transaction at row {row_index} updated by delete-and-recreate."
+
+        # Fallback: find a matching transaction if row_index not provided
+        criteria = {
+            "date": date,
+            "description": description,
+            "amount": amount,
+            "transaction_type": transaction_type,
+            "category": category,
+        }
+
+        print(f"[DEBUG] edit_transaction called with criteria: {criteria}")
+        result = self.get_all_transactions()
+        if result["status"] != "success":
+            raise Exception(result.get("message", "Failed to get transactions"))
+        transactions = result["transactions"]
+
+
+        def matches(txn, criteria):
+            for key, value in criteria.items():
+                if value is None:
+                    continue
+                txn_value = txn.get(key)
+                if txn_value is None:
+                    return False
+                if key == "amount":
+                    try:
+                        if abs(float(txn_value) - float(value)) > 0.01:
+                            return False
+                    except:
+                        return False
+                elif key == "description":
+                    if value.lower() not in txn_value.lower():
+                        return False
+                else:
+                    if str(txn_value).strip().lower() != str(value).strip().lower():
+                        return False
+            return True
+
+        for i, txn in enumerate(transactions):
+            if matches(txn, criteria):
+                row_index = i + 2
+                print(f"[INFO] Found match at row {row_index}: {txn}")
+                updated_transaction = {
+                    "date": date or txn.get("date"),
+                    "description": description or txn.get("description"),
+                    "amount": amount or txn.get("amount"),
+                    "transaction_type": transaction_type or txn.get("transaction_type"),
+                    "category": category or txn.get("category"),
+                }
+                self.delete_transaction(row_index)
+                self.add_transaction(**updated_transaction)
+                return f"Transaction updated by delete-and-recreate at row {row_index}."
+
+        print("[WARN] No matching transaction found.")
+        return "No matching transaction found."
+
+
+
+
+    # In budget_tools.py, inside BudgetSheetsManager:
+
+#    def edit_transaction_by_recreate(self, date=None, description=None, amount=None, transaction_type=None, category=None):
+#        # 1. Find matching transactions
+#        find_result = self.find_matching_transactions(
+#            date=date,
+#            description=description,
+#            amount=amount,
+#            transaction_type=transaction_type,
+#            category=category,
+#        )
+#        if find_result["status"] != "success":
+#            return find_result
+    
+#        matches = find_result["matches"]
+#        if len(matches) == 0:
+#            return {"status": "error", "message": "No matching transaction found."}
+#        elif len(matches) > 1:
+#            return {"status": "ambiguous", "message": f"Multiple transactions found. Please be more specific."}
+
+#        old_txn = matches[0]
+#        row_index = old_txn["_row_index"]
+
+        # 2. Delete the old transaction
+#        delete_result = self.delete_transaction(row_index)
+#        if delete_result["status"] != "success":
+#            return delete_result
+
+        # 3. Prepare new transaction data — use updated values or fallback to old if None
+#        new_date = date or old_txn["date"]
+#        new_description = description or old_txn["description"]
+#        new_amount = amount if amount is not None else old_txn["amount"]
+#        new_type = transaction_type or old_txn["transaction_type"]
+#        new_category = category or old_txn["category"]
+
+        # 4. Add new transaction
+#        add_result = self.add_transaction(new_date, new_description, new_amount, new_type, new_category)
+    
+#        return add_result
+
+
+
+
 
     def get_all_existing_categories(self):
         categories = set()

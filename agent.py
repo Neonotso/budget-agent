@@ -18,6 +18,24 @@ manager = BudgetSheetsManager()
 print(manager.get_all_existing_categories())
 
 
+#result = manager.find_matching_transactions(description="groceries", amount=75.50)
+
+#if result["status"] == "success":
+#    matches = result["matches"]
+#    if len(matches) == 1:
+#        row_index = matches[0]["_row_index"]
+#        update_result = manager.edit_transaction(row_index, category="Food")
+#        print(update_result)
+#    elif len(matches) == 0:
+#        print("No matching transactions found.")
+#    else:
+#        print(f"{len(matches)} matches found. Please be more specific.")
+#else:
+#    print("Error finding matches:", result["message"])
+
+
+
+import asyncio
 
 class ToolError(Exception):
     """Custom exception to signal tool execution errors to the agent framework."""
@@ -57,6 +75,36 @@ class Assistant(Agent):
 
         return self.budget_manager.add_transaction(date, description, amount, transaction_type, category)
 
+
+
+#    @function_tool()
+#    async def edit_transaction(self, context: RunContext, date=None, description=None, amount=None, transaction_type=None, category=None):
+#        return self.budget_manager.edit_transaction_by_recreate(date, description, amount, transaction_type, category)
+
+
+
+#    @function_tool()
+#    async def edit_transaction(self, context: RunContext, date=None, description=None, amount=None, transaction_type=None, category=None):
+#        try:
+#            # Run the synchronous blocking method in a thread to avoid blocking the async loop
+#            result = await asyncio.to_thread(
+#                self.budget_manager.edit_transaction_by_recreate,
+#                date=date,
+#                description=description,
+#                amount=amount,
+#                transaction_type=transaction_type,
+#                category=category
+#            )
+#            return result
+#        except Exception as e:
+#            # Log the exception and return a user-friendly error
+#            print(f"Exception in edit_transaction: {e}")
+#            return {"status": "error", "message": f"Failed to edit transaction: {e}"}
+
+
+
+
+
     @function_tool()
     async def edit_transaction(self, context: RunContext, row_index: int, date: str = None, description: str = None, amount: float = None, transaction_type: str = None, category: str = None):
         """Edits an existing transaction in the budget."""
@@ -68,6 +116,7 @@ class Assistant(Agent):
 
         print(f"DEBUG: edit_transaction called with row_index={row_index}, date={date}, description={description}, amount={amount}, transaction_type={transaction_type}, category={category}")
         return self.budget_manager.edit_transaction(row_index, date, description, amount, transaction_type, category)
+
 
     @function_tool()
     async def delete_transaction(self, context: RunContext, description: str = None, category: str = None, amount: float = None, date: str = None):
@@ -111,7 +160,7 @@ class Assistant(Agent):
     async def get_transactions(self, context: RunContext, date: str = None, description: str = None, amount: float = None, transaction_type: str = None, category: str = None):
         """Retrieves transactions based on optional filters."""
         import asyncio
-        return await asyncio.to_thread(self.budget_manager.get_all_transactions())
+        return await asyncio.to_thread(self.budget_manager.get_all_transactions)
 
 
 async def entrypoint(ctx: agents.JobContext):
@@ -136,10 +185,13 @@ async def entrypoint(ctx: agents.JobContext):
         )
         print("Session started")
 
-        await session.generate_reply(
-            instructions="Greet the user and offer your assistance."
+        await asyncio.wait_for(
+            session.generate_reply(
+                instructions="Greet the user and offer your assistance."
+            )
         )
         print("Generated initial reply")
+        timeout=15 # seconds
 
     except Exception as e:
         print(f"Exception in entrypoint: {e}")
