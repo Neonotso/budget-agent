@@ -23,3 +23,5 @@ ai/
 .env
 token.json
 test_openai.py
+.env
+.env
