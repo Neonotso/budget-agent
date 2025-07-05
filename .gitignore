@@ -20,3 +20,6 @@ env/
 *.tmp
 ai/
 ai/
+.env
+token.json
+test_openai.py
