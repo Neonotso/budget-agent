@@ -6,25 +6,22 @@ __pycache__/
 .venv/
 venv/
 env/
-.env/
 
-# IDE files
+# Environment variable files (secrets)
+.env
+token.json
+
+# IDE/editor files
 .vscode/
 .idea/
 
 # macOS files
 .DS_Store
 
-# Backup files
+# Backup and temp files
 *.bak
 *.tmp
+
+# AI folder (if it should be ignored)
 ai/
-ai/
-.env
-token.json
-test_openai.py
-.env
-.env
-.env
-.env
-.env
+
